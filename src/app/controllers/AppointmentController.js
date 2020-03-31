@@ -6,7 +6,8 @@ import User from '../models/User';
 import File from '../models/File';
 import Notification from '../schemas/Notification';
 
-import Mail from '../../lib/Mail';
+import CancelationMail from '../jobs/CancellationMail';
+import Queue from '../../lib/Queue';
 
 import * as Yup from 'yup';
 
@@ -91,19 +92,6 @@ class AppointmentController {
         .json({ error: 'Appointment date is not available' });
     }
 
-    /** 
-     * Check if provider is a user
-     */
-    const checkIsProviderIsUser = await Appointment.findOne({
-      where: { provider_id: req.userId },
-    });
-
-    if (checkIsProviderIsUser) {
-      return res
-        .status(401)
-        .json({ error: "The user isn't appointment with himself" });
-    }
-
     const appointment = await Appointment.create({
       user_id: req.userId,
       provider_id,
@@ -119,7 +107,8 @@ class AppointmentController {
       hourStart, 
       "'dia' dd 'de' MMMM', às' H:mm'h'" ,
       { locale: pt }
-    )
+    );
+
     await Notification.create({
       content: `Novo agendamento de ${user.name} para ${formattedDate}`,
       user: provider_id,
@@ -135,6 +124,11 @@ class AppointmentController {
           model: User,
           as: 'provider',
           attributes: ['name', 'email']
+        },
+        {
+          model: User,
+          as: 'user',
+          attributes: ['name'],
         }
       ]
     });
@@ -157,11 +151,10 @@ class AppointmentController {
 
     await appointment.save();
 
-    await Mail.sendMail({
-      to: `${appointment.provider.name} <${appointment.provider.email}>`,
-      subject: 'Agendamento cancelado',
-      text: 'Você tem um novo cancelamento',
+    await Queue.add(CancelationMail.key, {
+      appointment,
     });
+
     return res.json(appointment);
   }
 }
